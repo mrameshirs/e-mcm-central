@@ -1,12 +1,13 @@
 # app.py - Updated for Centralized Approach
 import streamlit as st
 import pandas as pd
+import time
 st.set_page_config(layout="wide", page_title="e-MCM App - GST Audit 1")
 
 # --- Custom Module Imports ---
 from config import MASTER_DRIVE_FOLDER_ID, CENTRALIZED_DAR_UPLOAD_FOLDER_ID, MASTER_DAR_DATABASE_SHEET_ID, MCM_INFO_SHEET_ID
 from css_styles import load_custom_css
-from google_utils import get_google_services, initialize_drive_structure, verify_sheets_access
+from google_utils import get_google_services, initialize_drive_structure
 from ui_login import login_page
 from ui_pco import pco_dashboard
 from ui_audit_group import audit_group_dashboard
@@ -54,23 +55,16 @@ else:
         if not st.session_state.get('drive_structure_initialized'):
             with st.spinner("Verifying access to centralized Google Drive and Sheets resources..."):
                 if initialize_drive_structure(st.session_state.drive_service):
-                    # Also verify sheets access
-                    if verify_sheets_access(st.session_state.sheets_service):
-                        st.session_state.drive_structure_initialized = True
-                        st.success("✅ Access verified to centralized resources:")
-                        st.info(f"📁 DAR Upload Folder: `{CENTRALIZED_DAR_UPLOAD_FOLDER_ID}`")
-                        st.info(f"📊 Master Database: `{MASTER_DAR_DATABASE_SHEET_ID}`")
-                        st.info(f"📋 MCM Info Sheet: `{MCM_INFO_SHEET_ID}`")
-                        time.sleep(2)  # Brief pause to show success messages
-                        st.rerun()
-                    else:
-                        st.error("Failed to verify access to required Google Sheets. Please check service account permissions.")
-                        if st.button("Logout", key="fail_logout_sheets_access"):
-                            st.session_state.logged_in = False; st.rerun()
-                        st.stop()
+                    st.session_state.drive_structure_initialized = True
+                    st.success("✅ Access verified to centralized resources:")
+                    st.info(f"📁 DAR Upload Folder: `{CENTRALIZED_DAR_UPLOAD_FOLDER_ID}`")
+                    st.info(f"📊 Master Database: `{MASTER_DAR_DATABASE_SHEET_ID}`")
+                    st.info(f"📋 MCM Info Sheet: `{MCM_INFO_SHEET_ID}`")
+                    time.sleep(2)  # Brief pause to show success messages
+                    st.rerun()
                 else:
-                    st.error("Failed to verify access to required Google Drive folders. Please check service account permissions.")
-                    if st.button("Logout", key="fail_logout_drive_access"):
+                    st.error("Failed to verify access to required Google Drive folders and Sheets. Please check service account permissions.")
+                    if st.button("Logout", key="fail_logout_access_verification"):
                         st.session_state.logged_in = False; st.rerun()
                     st.stop()
 
