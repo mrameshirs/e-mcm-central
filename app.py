@@ -54,7 +54,7 @@ else:
         # Verify access to pre-created resources instead of creating them
         if not st.session_state.get('drive_structure_initialized'):
             with st.spinner("Verifying access to centralized Google Drive and Sheets resources..."):
-                if initialize_drive_structure(st.session_state.drive_service):
+                if initialize_drive_structure(st.session_state.drive_service, st.session_state.sheets_service):
                     st.session_state.drive_structure_initialized = True
                     st.success("✅ Access verified to centralized resources:")
                     st.info(f"📁 DAR Upload Folder: `{CENTRALIZED_DAR_UPLOAD_FOLDER_ID}`")
