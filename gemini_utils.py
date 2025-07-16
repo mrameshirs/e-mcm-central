@@ -61,16 +61,15 @@ def get_structured_data_with_gemini(api_key: str, text_content: str, max_retries
         debug_print(f"ERROR: Text content too short - length: {len(text_content) if text_content else 0}")
         return ParsedDARReport(parsing_errors="Text content too short or empty for analysis.")
 
-    # Free tier has input limits, so truncate if too long
-    # Free tier limit is around 30K characters for gemini-1.5-flash
-    MAX_FREE_TIER_CHARS = 25000  # Leave some buffer
+    # Don't truncate - send full text to Gemini
+    # Gemini 1.5 Flash can handle much larger inputs (up to 1M tokens)
     original_length = len(text_content)
+    debug_print(f"Text length: {original_length} characters - sending full content to Gemini")
     
-    if original_length > MAX_FREE_TIER_CHARS:
-        debug_print(f"WARNING: Text too long ({original_length} chars), truncating to {MAX_FREE_TIER_CHARS}")
-        text_content = text_content[:MAX_FREE_TIER_CHARS] + "\n[INFO: Text truncated due to free tier limits]"
-    else:
-        debug_print(f"Text length OK: {original_length} characters")
+    # For very large texts, we might need to handle them differently, but let's try full text first
+    if original_length > 100000:  # 100K chars
+        debug_print(f"WARNING: Very large text ({original_length} chars). If this fails, consider chunking.")
+        # But still send the full text - don't truncate
 
     # Prepare prompt
     prompt = f"""
@@ -122,14 +121,14 @@ def get_structured_data_with_gemini(api_key: str, text_content: str, max_retries
         debug_print(f"Attempt {attempt}/{max_retries + 1}")
         
         try:
-            # Free tier friendly generation config
+            # Enhanced generation config for larger texts
             debug_print("Sending request to Gemini API")
             
             generation_config = genai.types.GenerationConfig(
                 candidate_count=1,
                 temperature=0.1,
-                max_output_tokens=4096,  # Reduced for free tier
-                stop_sequences=["\n\n---", "END_JSON"]
+                max_output_tokens=8192,  # Increased for larger responses
+                # Removed stop_sequences to allow full processing
             )
             
             safety_settings = [
@@ -139,7 +138,7 @@ def get_structured_data_with_gemini(api_key: str, text_content: str, max_retries
                 {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
             ]
             
-            debug_print(f"Generation config: temperature=0.1, max_tokens=4096")
+            debug_print(f"Generation config: temperature=0.1, max_tokens=8192")
             
             response = model.generate_content(
                 prompt,
@@ -327,7 +326,7 @@ def get_structured_data_with_gemini(api_key: str, text_content: str, max_retries
     # If we get here, all attempts failed
     final_error = f"Gemini API failed after {max_retries + 1} attempts. Last error: {str(last_exception)[:200]}... Try again in a few minutes (free tier rate limits)."
     debug_print(f"FINAL ERROR: {final_error}")
-    return ParsedDARReport(parsing_errors=final_error)# #gemini_utils.py
+    return ParsedDARReport(parsing_errors=final_error)
 # import streamlit as st
 # import json
 # import time
