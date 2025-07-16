@@ -1,4 +1,5 @@
 # ui_audit_group.py - Fixed with Enhanced Debugging
+# ui_audit_group.py - Fixed with Enhanced Debugging
 import streamlit as st
 import pandas as pd
 import datetime
@@ -402,12 +403,13 @@ def audit_group_dashboard(drive_service, sheets_service):
                                 debug_print(f"PDF uploaded successfully. URL: {st.session_state.ag_pdf_drive_url}")
                                 
                                 # PDF text extraction
-                                debug_print("Starting PDF text extraction")
-                                st.info("Starting PDF text extraction...")
+                                debug_print("Starting PDF text extraction - NO TRUNCATION")
+                                st.info("Starting PDF text extraction (full content)...")
                                 
                                 try:
-                                    preprocessed_text = preprocess_pdf_text(BytesIO(pdf_bytes))
-                                    debug_print(f"PDF text extraction result: {preprocessed_text[:100]}...")
+                                    # Extract FULL text without any limits
+                                    preprocessed_text = preprocess_pdf_text(BytesIO(pdf_bytes))  # No max_pages limit
+                                    debug_print(f"PDF text extraction result: {len(preprocessed_text)} characters (full content)")
                                     
                                     if preprocessed_text.startswith("Error"):
                                         debug_print(f"PDF preprocessing error: {preprocessed_text}")
@@ -420,19 +422,22 @@ def audit_group_dashboard(drive_service, sheets_service):
                                         })
                                         temp_list_for_df.append(base_row_manual)
                                     else:
-                                        st.info(f"PDF text extracted successfully. Length: {len(preprocessed_text)} characters")
-                                        debug_print(f"PDF text extracted successfully. Length: {len(preprocessed_text)} characters")
+                                        st.info(f"PDF text extracted successfully. Full length: {len(preprocessed_text)} characters")
+                                        debug_print(f"PDF text extracted successfully. Full length: {len(preprocessed_text)} characters")
                                         
-                                        # Show preview of extracted text
+                                        # Show preview of extracted text (first 500 chars for UI)
                                         with st.expander("Preview extracted text (first 500 characters)"):
                                             st.text(preprocessed_text[:500])
                                         
-                                        # AI Analysis
-                                        debug_print("Starting AI analysis with Gemini")
-                                        st.info("Starting AI analysis with Gemini...")
+                                        # Show info about full content being sent
+                                        st.info(f"🔄 Sending FULL document content ({len(preprocessed_text)} characters) to Gemini AI")
+                                        
+                                        # AI Analysis with FULL content
+                                        debug_print("Starting AI analysis with Gemini - FULL CONTENT")
+                                        st.info("Starting AI analysis with Gemini (processing full document)...")
                                         
                                         try:
-                                            debug_print(f"Calling Gemini with API key: {YOUR_GEMINI_API_KEY[:10]}...")
+                                            debug_print(f"Calling Gemini with FULL content: {len(preprocessed_text)} characters")
                                             parsed_data: ParsedDARReport = get_structured_data_with_gemini(YOUR_GEMINI_API_KEY, preprocessed_text)
                                             debug_print(f"Gemini response received. Parsing errors: {parsed_data.parsing_errors}")
                                             
@@ -456,8 +461,8 @@ def audit_group_dashboard(drive_service, sheets_service):
                                             debug_print(f"Base info prepared: {base_info}")
                                             
                                             if parsed_data.audit_paras:
-                                                debug_print(f"AI found {len(parsed_data.audit_paras)} audit paras")
-                                                st.info(f"AI found {len(parsed_data.audit_paras)} audit paras")
+                                                debug_print(f"AI found {len(parsed_data.audit_paras)} audit paras from FULL document")
+                                                st.success(f"🎉 AI found {len(parsed_data.audit_paras)} audit paras from full document!")
                                                 
                                                 for i, para_obj in enumerate(parsed_data.audit_paras):
                                                     para_dict = para_obj.model_dump()
@@ -478,8 +483,8 @@ def audit_group_dashboard(drive_service, sheets_service):
                                                 })
                                                 temp_list_for_df.append(row)
                                             else:
-                                                debug_print("AI failed to extract key header information")
-                                                st.error("AI failed to extract key header information")
+                                                debug_print("AI failed to extract key header information from full document")
+                                                st.error("AI failed to extract key header information from full document")
                                                 row = base_info.copy()
                                                 row.update({
                                                     "audit_para_heading": "Manual Entry Required - AI Extraction Failed", 
