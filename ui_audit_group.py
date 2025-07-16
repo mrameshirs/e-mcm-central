@@ -1,5 +1,4 @@
-# ui_audit_group.py - Fixed with Enhanced Debugging
-# ui_audit_group.py - Fixed with Enhanced Debugging
+  # ui_audit_group.py - Fixed with Enhanced Debugging
 import streamlit as st
 import pandas as pd
 import datetime
@@ -346,221 +345,260 @@ def audit_group_dashboard(drive_service, sheets_service):
                 extract_button_key = f"extract_data_btn_centralized_{st.session_state.ag_current_mcm_key}_{st.session_state.ag_current_uploaded_file_name or 'no_file_yet'}"
                 debug_print(f"Extract button key: {extract_button_key}")
                 
-                if st.session_state.ag_current_uploaded_file_obj and st.button("Extract Data from PDF", key=extract_button_key, use_container_width=True):
-                    debug_print("Extract Data button clicked")
+                # Check if we need to process the file
+                should_process = (st.session_state.ag_current_uploaded_file_obj and 
+                                st.session_state.ag_editor_data.empty)
+                
+                debug_print(f"Should process file: {should_process}")
+                debug_print(f"Editor data empty: {st.session_state.ag_editor_data.empty}")
+                debug_print(f"Editor data shape: {st.session_state.ag_editor_data.shape}")
+                
+                # Show extract button or auto-process
+                if should_process:
+                    if st.button("Extract Data from PDF", key=extract_button_key, use_container_width=True):
+                        debug_print("Extract Data button clicked - starting processing")
+                        process_pdf_extraction()
                     
-                    with st.spinner(f"Processing '{st.session_state.ag_current_uploaded_file_name}'... This might take a moment."):
-                        try:
-                            debug_print("Getting PDF bytes from uploaded file")
-                            
-                            # Enhanced file handling with error checking
-                            if hasattr(st.session_state.ag_current_uploaded_file_obj, 'getvalue'):
-                                pdf_bytes = st.session_state.ag_current_uploaded_file_obj.getvalue()
-                                debug_print(f"Got PDF bytes using getvalue(): {len(pdf_bytes)} bytes")
-                            else:
-                                debug_print("File object doesn't have getvalue(), trying read()")
-                                # Reset file pointer if possible
-                                if hasattr(st.session_state.ag_current_uploaded_file_obj, 'seek'):
-                                    st.session_state.ag_current_uploaded_file_obj.seek(0)
-                                pdf_bytes = st.session_state.ag_current_uploaded_file_obj.read()
-                                debug_print(f"Got PDF bytes using read(): {len(pdf_bytes)} bytes")
-                            
-                            if not pdf_bytes:
-                                raise ValueError("PDF file is empty or could not be read")
-                            
-                            # Validate PDF header
-                            if not pdf_bytes.startswith(b'%PDF'):
-                                debug_print(f"WARNING: File doesn't start with PDF header. First 20 bytes: {pdf_bytes[:20]}")
-                                st.warning("⚠️ File doesn't appear to be a valid PDF. Processing anyway...")
-                            
-                            # Reset session state
-                            st.session_state.ag_pdf_drive_url = None 
-                            st.session_state.ag_validation_errors = []
+                    # Alternative: Auto-process option
+                    st.info("👆 Click 'Extract Data from PDF' to process the uploaded file")
+                else:
+                    if st.session_state.ag_current_uploaded_file_obj and not st.session_state.ag_editor_data.empty:
+                        st.success("✅ PDF data has been extracted. Review the data below.")
+                    elif st.session_state.ag_current_uploaded_file_obj:
+                        if st.button("Re-extract Data from PDF", key=f"re_{extract_button_key}", use_container_width=True):
+                            debug_print("Re-extract button clicked")
+                            process_pdf_extraction()
 
-                            # Upload to Drive
-                            debug_print("Uploading PDF to Drive")
-                            dar_filename_on_drive = f"AG{st.session_state.audit_group_no}_{st.session_state.ag_current_uploaded_file_name}"
-                            debug_print(f"Drive filename: {dar_filename_on_drive}")
-                            
-                            pdf_drive_id, pdf_drive_url_temp = upload_to_drive(drive_service, BytesIO(pdf_bytes), dar_filename_on_drive)
-                            debug_print(f"Upload result - ID: {pdf_drive_id}, URL: {pdf_drive_url_temp}")
-                            
-                            temp_list_for_df = []
-                            
-                            if not pdf_drive_id:
-                                debug_print("ERROR: Failed to upload PDF to Drive")
-                                st.error("Failed to upload PDF to Drive. Cannot proceed with extraction.")
-                                base_row_manual = {col: None for col in DISPLAY_COLUMN_ORDER_EDITOR}
-                                base_row_manual.update({
-                                    "audit_group_number": st.session_state.audit_group_no, 
-                                    "audit_circle_number": calculate_audit_circle(st.session_state.audit_group_no), 
-                                    "audit_para_heading": "Manual Entry - PDF Upload Failed"
-                                })
-                                temp_list_for_df.append(base_row_manual)
-                            else:
-                                st.session_state.ag_pdf_drive_url = pdf_drive_url_temp
-                                st.success(f"DAR PDF uploaded to Centralized Drive: [Link]({st.session_state.ag_pdf_drive_url})")
-                                debug_print(f"PDF uploaded successfully. URL: {st.session_state.ag_pdf_drive_url}")
-                                
-                                # PDF text extraction
-                                debug_print("Starting PDF text extraction - NO TRUNCATION")
-                                st.info("Starting PDF text extraction (full content)...")
-                                
-                                try:
-                                    # Extract FULL text without any limits
-                                    preprocessed_text = preprocess_pdf_text(BytesIO(pdf_bytes))  # No max_pages limit
-                                    debug_print(f"PDF text extraction result: {len(preprocessed_text)} characters (full content)")
-                                    
-                                    if preprocessed_text.startswith("Error"):
-                                        debug_print(f"PDF preprocessing error: {preprocessed_text}")
-                                        st.error(f"PDF Preprocessing Error: {preprocessed_text}")
-                                        base_row_manual = {col: None for col in DISPLAY_COLUMN_ORDER_EDITOR}
-                                        base_row_manual.update({
-                                            "audit_group_number": st.session_state.audit_group_no, 
-                                            "audit_circle_number": calculate_audit_circle(st.session_state.audit_group_no), 
-                                            "audit_para_heading": "Manual Entry - PDF Processing Error"
-                                        })
-                                        temp_list_for_df.append(base_row_manual)
-                                    else:
-                                        st.info(f"PDF text extracted successfully. Full length: {len(preprocessed_text)} characters")
-                                        debug_print(f"PDF text extracted successfully. Full length: {len(preprocessed_text)} characters")
-                                        
-                                        # Show preview of extracted text (first 500 chars for UI)
-                                        with st.expander("Preview extracted text (first 500 characters)"):
-                                            st.text(preprocessed_text[:500])
-                                        
-                                        # Show info about full content being sent
-                                        st.info(f"🔄 Sending FULL document content ({len(preprocessed_text)} characters) to Gemini AI")
-                                        
-                                        # AI Analysis with FULL content
-                                        debug_print("Starting AI analysis with Gemini - FULL CONTENT")
-                                        st.info("Starting AI analysis with Gemini (processing full document)...")
-                                        
-                                        try:
-                                            debug_print(f"Calling Gemini with FULL content: {len(preprocessed_text)} characters")
-                                            parsed_data: ParsedDARReport = get_structured_data_with_gemini(YOUR_GEMINI_API_KEY, preprocessed_text)
-                                            debug_print(f"Gemini response received. Parsing errors: {parsed_data.parsing_errors}")
-                                            
-                                            if parsed_data.parsing_errors: 
-                                                st.warning(f"AI Parsing Issues: {parsed_data.parsing_errors}")
-                                                debug_print(f"AI parsing issues: {parsed_data.parsing_errors}")
-                                        
-                                            header_dict = parsed_data.header.model_dump() if parsed_data.header else {}
-                                            debug_print(f"Header data extracted: {header_dict}")
-                                            st.info(f"AI extracted header info: {header_dict}")
-                                            
-                                            base_info = {
-                                                "audit_group_number": st.session_state.audit_group_no,
-                                                "audit_circle_number": calculate_audit_circle(st.session_state.audit_group_no),
-                                                "gstin": header_dict.get("gstin"), 
-                                                "trade_name": header_dict.get("trade_name"), 
-                                                "category": header_dict.get("category"),
-                                                "total_amount_detected_overall_rs": header_dict.get("total_amount_detected_overall_rs"),
-                                                "total_amount_recovered_overall_rs": header_dict.get("total_amount_recovered_overall_rs"),
-                                            }
-                                            debug_print(f"Base info prepared: {base_info}")
-                                            
-                                            if parsed_data.audit_paras:
-                                                debug_print(f"AI found {len(parsed_data.audit_paras)} audit paras from FULL document")
-                                                st.success(f"🎉 AI found {len(parsed_data.audit_paras)} audit paras from full document!")
-                                                
-                                                for i, para_obj in enumerate(parsed_data.audit_paras):
-                                                    para_dict = para_obj.model_dump()
-                                                    debug_print(f"Processing para {i+1}: {para_dict}")
-                                                    
-                                                    row = base_info.copy()
-                                                    row.update({k: para_dict.get(k) for k in ["audit_para_number", "audit_para_heading", "revenue_involved_lakhs_rs", "revenue_recovered_lakhs_rs", "status_of_para"]})
-                                                    temp_list_for_df.append(row)
-                                                    
-                                            elif base_info.get("trade_name"):
-                                                debug_print("AI extracted header data but no specific paras found")
-                                                st.info("AI extracted header data but no specific paras found")
-                                                row = base_info.copy()
-                                                row.update({
-                                                    "audit_para_number": None, 
-                                                    "audit_para_heading": "N/A - Header Info Only (Add Paras Manually)", 
-                                                    "status_of_para": None
-                                                })
-                                                temp_list_for_df.append(row)
-                                            else:
-                                                debug_print("AI failed to extract key header information from full document")
-                                                st.error("AI failed to extract key header information from full document")
-                                                row = base_info.copy()
-                                                row.update({
-                                                    "audit_para_heading": "Manual Entry Required - AI Extraction Failed", 
-                                                    "status_of_para": None
-                                                })
-                                                temp_list_for_df.append(row)
-                                                
-                                        except Exception as e_gemini:
-                                            debug_exception(e_gemini, "Gemini API error during processing")
-                                            st.error(f"Gemini API Error: {str(e_gemini)}")
-                                            st.error("Please check your Gemini API key and try again.")
-                                            
-                                            # Show the extracted text for manual review
-                                            with st.expander("Show extracted text for manual review"):
-                                                st.text_area("Extracted Text", preprocessed_text, height=300)
-                                            
-                                            # Create fallback entry
-                                            base_row_manual = {col: None for col in DISPLAY_COLUMN_ORDER_EDITOR}
-                                            base_row_manual.update({
-                                                "audit_group_number": st.session_state.audit_group_no, 
-                                                "audit_circle_number": calculate_audit_circle(st.session_state.audit_group_no), 
-                                                "audit_para_heading": "Manual Entry Required - Gemini API Error"
-                                            })
-                                            temp_list_for_df.append(base_row_manual)
-                                            
-                                except Exception as e_pdf:
-                                    debug_exception(e_pdf, "PDF text extraction error")
-                                    st.error(f"PDF Text Extraction Error: {str(e_pdf)}")
-                                    
-                                    # Create fallback entry
-                                    base_row_manual = {col: None for col in DISPLAY_COLUMN_ORDER_EDITOR}
-                                    base_row_manual.update({
-                                        "audit_group_number": st.session_state.audit_group_no, 
-                                        "audit_circle_number": calculate_audit_circle(st.session_state.audit_group_no), 
-                                        "audit_para_heading": "Manual Entry Required - PDF Extraction Error"
-                                    })
-                                    temp_list_for_df.append(base_row_manual)
+def process_pdf_extraction():
+    """Separate function to handle PDF extraction logic"""
+    debug_print("=== STARTING PDF EXTRACTION PROCESS ===")
+    
+    with st.spinner(f"Processing '{st.session_state.ag_current_uploaded_file_name}'... This might take a moment."):
+        try:
+            debug_print("Getting PDF bytes from uploaded file")
+            
+            # Enhanced file handling with error checking
+            if hasattr(st.session_state.ag_current_uploaded_file_obj, 'getvalue'):
+                pdf_bytes = st.session_state.ag_current_uploaded_file_obj.getvalue()
+                debug_print(f"Got PDF bytes using getvalue(): {len(pdf_bytes)} bytes")
+            else:
+                debug_print("File object doesn't have getvalue(), trying read()")
+                # Reset file pointer if possible
+                if hasattr(st.session_state.ag_current_uploaded_file_obj, 'seek'):
+                    st.session_state.ag_current_uploaded_file_obj.seek(0)
+                pdf_bytes = st.session_state.ag_current_uploaded_file_obj.read()
+                debug_print(f"Got PDF bytes using read(): {len(pdf_bytes)} bytes")
+            
+            if not pdf_bytes:
+                raise ValueError("PDF file is empty or could not be read")
+            
+            # Validate PDF header
+            if not pdf_bytes.startswith(b'%PDF'):
+                debug_print(f"WARNING: File doesn't start with PDF header. First 20 bytes: {pdf_bytes[:20]}")
+                st.warning("⚠️ File doesn't appear to be a valid PDF. Processing anyway...")
+            else:
+                debug_print("✅ Valid PDF header confirmed")
+            
+            # Reset session state
+            st.session_state.ag_pdf_drive_url = None 
+            st.session_state.ag_validation_errors = []
+
+            # Upload to Drive
+            debug_print("=== UPLOADING PDF TO DRIVE ===")
+            dar_filename_on_drive = f"AG{st.session_state.audit_group_no}_{st.session_state.ag_current_uploaded_file_name}"
+            debug_print(f"Drive filename: {dar_filename_on_drive}")
+            
+            # Import drive service (assuming it's available in scope)
+            from google_utils import upload_to_drive
+            pdf_drive_id, pdf_drive_url_temp = upload_to_drive(st.session_state.get('drive_service'), BytesIO(pdf_bytes), dar_filename_on_drive)
+            debug_print(f"Upload result - ID: {pdf_drive_id}, URL: {pdf_drive_url_temp}")
+            
+            temp_list_for_df = []
+            
+            if not pdf_drive_id:
+                debug_print("ERROR: Failed to upload PDF to Drive")
+                st.error("Failed to upload PDF to Drive. Cannot proceed with extraction.")
+                base_row_manual = {col: None for col in DISPLAY_COLUMN_ORDER_EDITOR}
+                base_row_manual.update({
+                    "audit_group_number": st.session_state.audit_group_no, 
+                    "audit_circle_number": calculate_audit_circle(st.session_state.audit_group_no), 
+                    "audit_para_heading": "Manual Entry - PDF Upload Failed"
+                })
+                temp_list_for_df.append(base_row_manual)
+            else:
+                st.session_state.ag_pdf_drive_url = pdf_drive_url_temp
+                st.success(f"DAR PDF uploaded to Centralized Drive: [Link]({st.session_state.ag_pdf_drive_url})")
+                debug_print(f"PDF uploaded successfully. URL: {st.session_state.ag_pdf_drive_url}")
+                
+                # PDF text extraction
+                debug_print("=== STARTING PDF TEXT EXTRACTION ===")
+                st.info("Starting PDF text extraction (full content)...")
+                
+                try:
+                    # Extract FULL text without any limits
+                    from dar_processor import preprocess_pdf_text
+                    preprocessed_text = preprocess_pdf_text(BytesIO(pdf_bytes))  # No max_pages limit
+                    debug_print(f"PDF text extraction result: {len(preprocessed_text)} characters (full content)")
+                    
+                    if preprocessed_text.startswith("Error"):
+                        debug_print(f"PDF preprocessing error: {preprocessed_text}")
+                        st.error(f"PDF Preprocessing Error: {preprocessed_text}")
+                        base_row_manual = {col: None for col in DISPLAY_COLUMN_ORDER_EDITOR}
+                        base_row_manual.update({
+                            "audit_group_number": st.session_state.audit_group_no, 
+                            "audit_circle_number": calculate_audit_circle(st.session_state.audit_group_no), 
+                            "audit_para_heading": "Manual Entry - PDF Processing Error"
+                        })
+                        temp_list_for_df.append(base_row_manual)
+                    else:
+                        st.success(f"✅ PDF text extracted successfully! Full length: {len(preprocessed_text)} characters")
+                        debug_print(f"PDF text extracted successfully. Full length: {len(preprocessed_text)} characters")
                         
-                        except Exception as e_main:
-                            debug_exception(e_main, "Main processing error")
-                            st.error(f"Processing Error: {str(e_main)}")
+                        # Show preview of extracted text (first 500 chars for UI)
+                        with st.expander("Preview extracted text (first 500 characters)"):
+                            st.text(preprocessed_text[:500])
+                        
+                        # Show info about full content being sent
+                        st.info(f"🔄 Sending FULL document content ({len(preprocessed_text)} characters) to Gemini AI")
+                        
+                        # AI Analysis with FULL content
+                        debug_print("=== STARTING AI ANALYSIS WITH GEMINI ===")
+                        st.info("🤖 Starting AI analysis with Gemini (processing full document)...")
+                        
+                        try:
+                            # Get API key
+                            YOUR_GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "YOUR_API_KEY_HERE_FALLBACK")
+                            debug_print(f"Using API key: {YOUR_GEMINI_API_KEY[:10]}...")
+                            
+                            debug_print(f"Calling Gemini with FULL content: {len(preprocessed_text)} characters")
+                            
+                            from gemini_utils import get_structured_data_with_gemini
+                            from models import ParsedDARReport
+                            
+                            parsed_data: ParsedDARReport = get_structured_data_with_gemini(YOUR_GEMINI_API_KEY, preprocessed_text)
+                            debug_print(f"Gemini response received. Parsing errors: {parsed_data.parsing_errors}")
+                            
+                            if parsed_data.parsing_errors: 
+                                st.warning(f"⚠️ AI Parsing Issues: {parsed_data.parsing_errors}")
+                                debug_print(f"AI parsing issues: {parsed_data.parsing_errors}")
+                        
+                            header_dict = parsed_data.header.model_dump() if parsed_data.header else {}
+                            debug_print(f"Header data extracted: {header_dict}")
+                            st.info(f"📋 AI extracted header info: {header_dict}")
+                            
+                            base_info = {
+                                "audit_group_number": st.session_state.audit_group_no,
+                                "audit_circle_number": calculate_audit_circle(st.session_state.audit_group_no),
+                                "gstin": header_dict.get("gstin"), 
+                                "trade_name": header_dict.get("trade_name"), 
+                                "category": header_dict.get("category"),
+                                "total_amount_detected_overall_rs": header_dict.get("total_amount_detected_overall_rs"),
+                                "total_amount_recovered_overall_rs": header_dict.get("total_amount_recovered_overall_rs"),
+                            }
+                            debug_print(f"Base info prepared: {base_info}")
+                            
+                            if parsed_data.audit_paras:
+                                debug_print(f"🎉 AI found {len(parsed_data.audit_paras)} audit paras from FULL document")
+                                st.success(f"🎉 AI found {len(parsed_data.audit_paras)} audit paras from full document!")
+                                
+                                for i, para_obj in enumerate(parsed_data.audit_paras):
+                                    para_dict = para_obj.model_dump()
+                                    debug_print(f"Processing para {i+1}: {para_dict.get('audit_para_heading', 'No heading')}")
+                                    
+                                    row = base_info.copy()
+                                    row.update({k: para_dict.get(k) for k in ["audit_para_number", "audit_para_heading", "revenue_involved_lakhs_rs", "revenue_recovered_lakhs_rs", "status_of_para"]})
+                                    temp_list_for_df.append(row)
+                                    
+                            elif base_info.get("trade_name"):
+                                debug_print("AI extracted header data but no specific paras found")
+                                st.info("AI extracted header data but no specific paras found")
+                                row = base_info.copy()
+                                row.update({
+                                    "audit_para_number": None, 
+                                    "audit_para_heading": "N/A - Header Info Only (Add Paras Manually)", 
+                                    "status_of_para": None
+                                })
+                                temp_list_for_df.append(row)
+                            else:
+                                debug_print("AI failed to extract key header information from full document")
+                                st.error("AI failed to extract key header information from full document")
+                                row = base_info.copy()
+                                row.update({
+                                    "audit_para_heading": "Manual Entry Required - AI Extraction Failed", 
+                                    "status_of_para": None
+                                })
+                                temp_list_for_df.append(row)
+                                
+                        except Exception as e_gemini:
+                            debug_exception(e_gemini, "Gemini API error during processing")
+                            st.error(f"❌ Gemini API Error: {str(e_gemini)}")
+                            st.error("Please check your Gemini API key and try again.")
+                            
+                            # Show the extracted text for manual review
+                            with st.expander("Show extracted text for manual review"):
+                                st.text_area("Extracted Text", preprocessed_text, height=300)
                             
                             # Create fallback entry
                             base_row_manual = {col: None for col in DISPLAY_COLUMN_ORDER_EDITOR}
                             base_row_manual.update({
                                 "audit_group_number": st.session_state.audit_group_no, 
                                 "audit_circle_number": calculate_audit_circle(st.session_state.audit_group_no), 
-                                "audit_para_heading": "Manual Entry Required - Processing Error"
+                                "audit_para_heading": "Manual Entry Required - Gemini API Error"
                             })
                             temp_list_for_df.append(base_row_manual)
-                        
-                        # Ensure we have at least one row
-                        if not temp_list_for_df: 
-                            debug_print("No data extracted, creating fallback row")
-                            base_row_manual = {col: None for col in DISPLAY_COLUMN_ORDER_EDITOR}
-                            base_row_manual.update({
-                                "audit_group_number": st.session_state.audit_group_no, 
-                                "audit_circle_number": calculate_audit_circle(st.session_state.audit_group_no), 
-                                "audit_para_heading": "Manual Entry - Extraction Issue"
-                            })
-                            temp_list_for_df.append(base_row_manual)
-                        
-                        # Create DataFrame
-                        debug_print(f"Creating DataFrame with {len(temp_list_for_df)} rows")
-                        df_extracted = pd.DataFrame(temp_list_for_df)
-                        
-                        # Ensure all required columns are present
-                        for col in DISPLAY_COLUMN_ORDER_EDITOR:
-                            if col not in df_extracted.columns: 
-                                df_extracted[col] = None
-                        
-                        st.session_state.ag_editor_data = df_extracted[DISPLAY_COLUMN_ORDER_EDITOR]
-                        debug_print(f"DataFrame created and stored in session state: {st.session_state.ag_editor_data.shape}")
-                        
-                        st.success("Data extraction processed. Review and edit below.")
-                        st.rerun()
+                            
+                except Exception as e_pdf:
+                    debug_exception(e_pdf, "PDF text extraction error")
+                    st.error(f"❌ PDF Text Extraction Error: {str(e_pdf)}")
+                    
+                    # Create fallback entry
+                    base_row_manual = {col: None for col in DISPLAY_COLUMN_ORDER_EDITOR}
+                    base_row_manual.update({
+                        "audit_group_number": st.session_state.audit_group_no, 
+                        "audit_circle_number": calculate_audit_circle(st.session_state.audit_group_no), 
+                        "audit_para_heading": "Manual Entry Required - PDF Extraction Error"
+                    })
+                    temp_list_for_df.append(base_row_manual)
+        
+        except Exception as e_main:
+            debug_exception(e_main, "Main processing error")
+            st.error(f"❌ Processing Error: {str(e_main)}")
+            
+            # Create fallback entry
+            base_row_manual = {col: None for col in DISPLAY_COLUMN_ORDER_EDITOR}
+            base_row_manual.update({
+                "audit_group_number": st.session_state.audit_group_no, 
+                "audit_circle_number": calculate_audit_circle(st.session_state.audit_group_no), 
+                "audit_para_heading": "Manual Entry Required - Processing Error"
+            })
+            temp_list_for_df.append(base_row_manual)
+        
+        # Ensure we have at least one row
+        if not temp_list_for_df: 
+            debug_print("No data extracted, creating fallback row")
+            base_row_manual = {col: None for col in DISPLAY_COLUMN_ORDER_EDITOR}
+            base_row_manual.update({
+                "audit_group_number": st.session_state.audit_group_no, 
+                "audit_circle_number": calculate_audit_circle(st.session_state.audit_group_no), 
+                "audit_para_heading": "Manual Entry - Extraction Issue"
+            })
+            temp_list_for_df.append(base_row_manual)
+        
+        # Create DataFrame
+        debug_print(f"=== CREATING DATAFRAME WITH {len(temp_list_for_df)} ROWS ===")
+        df_extracted = pd.DataFrame(temp_list_for_df)
+        
+        # Ensure all required columns are present
+        for col in DISPLAY_COLUMN_ORDER_EDITOR:
+            if col not in df_extracted.columns: 
+                df_extracted[col] = None
+        
+        st.session_state.ag_editor_data = df_extracted[DISPLAY_COLUMN_ORDER_EDITOR]
+        debug_print(f"DataFrame created and stored in session state: {st.session_state.ag_editor_data.shape}")
+        debug_print(f"Sample data: {st.session_state.ag_editor_data.head(1).to_dict('records')}")
+        
+        st.success("✅ Data extraction completed! Review and edit the data below.")
+        st.rerun()
 
                 # --- Data Editor and Submission ---
                 edited_df_local_copy = pd.DataFrame(columns=DISPLAY_COLUMN_ORDER_EDITOR)
@@ -954,8 +992,7 @@ def audit_group_dashboard(drive_service, sheets_service):
                     debug_print("Google Sheets service unavailable for deletion")
 
     st.markdown("</div>", unsafe_allow_html=True)
-    debug_print("Audit group dashboard completed")# # ui_audit_group.py - Updated for Centralized Approach
-# import streamlit as st
+    debug_print("Audit group dashboard completed")
 # import pandas as pd
 # import datetime
 # import math
